@@ -71,7 +71,7 @@ export default async function handler(req, res) {
       style="display:block;max-width:240px;max-height:110px;height:auto;margin-top:22px;">
   ` : '';
 
-  const logoUrl = 'https://www.getlinked.co.za/link-mark.png';
+  const logoUrl = 'https://lh7-us.googleusercontent.com/sitesv-images-rt/APXyLQcdBIZTZwn-o815ZOsUJaj1DIN1d5jMx5UKaovB1lYqQMxLbgwFh0rENB-aUpqr-rNxO11kWwcdHDLhVeuw8WHyJuw1UA5mGWM0SWvcMsy95tWde8FMGWVxI_uOxoN5WpUJ6jHdKyLXpdj6mQL7G7t6CU9K9hvDAS6RzHdAMdYFmSqrq2JThHbZjg=w1280';
 
   const htmlContent = `
   <!DOCTYPE html>
