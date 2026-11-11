@@ -1,2 +1,816 @@
-<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Email Distributor</title><style>body{font-family:Arial,sans-serif;background:#f4f7fb;margin:0}.wrap{max-width:1000px;margin:auto;padding:20px}.card{background:#fff;padding:20px;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.08)}input,textarea{width:100%;padding:10px;margin:8px 0}button{padding:10px 18px;background:#2563eb;color:#fff;border:none;border-radius:8px;cursor:pointer}.hidden{display:none}</style></head><body><div class="wrap"><div class="card"><h2>Email Distributor</h2><div id="step1"><input id="subject" placeholder="Subject"><textarea id="body" rows="8" placeholder="Email body"></textarea><input type="file" id="sig"><button onclick="go2()">Ready</button></div><div id="step2" class="hidden"><textarea id="recipients" rows="8" placeholder="Paste recipients"></textarea><div id="summary"></div><button onclick="back1()">Back</button><button onclick="go3()">Ready</button></div><div id="step3" class="hidden"><div id="review"></div><button onclick="back2()">Back</button><button id="sendBtn" onclick="sendEmails()">Send</button><pre id="results"></pre></div></div></div><script>let sig='';document.getElementById('sig').onchange=e=>{const r=new FileReader();r.onload=x=>sig=x.target.result;r.readAsDataURL(e.target.files[0]);};function go2(){step1.classList.add('hidden');step2.classList.remove('hidden')}function back1(){step2.classList.add('hidden');step1.classList.remove('hidden')}function back2(){step3.classList.add('hidden');step2.classList.remove('hidden')}function parseEmails(){let e=document.getElementById('recipients').value.split(/[\s,;]+/).filter(Boolean);e=[...new Set(e)];const valid=e.filter(x=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x));summary.innerHTML='Valid recipients: '+valid.length;return valid;}function go3(){const r=parseEmails();review.innerHTML='<h3>Review</h3><p><b>Subject:</b> '+subject.value+'</p><p>'+body.value.replace(/
-/g,'<br>')+'</p>'+(sig?'<img src="'+sig+'" style="max-width:250px">':'')+'<p>Total recipients: '+r.length+'</p><p>Each recipient receives an individual email.</p>';step2.classList.add('hidden');step3.classList.remove('hidden')}async function sendEmails(){sendBtn.disabled=true;const recipients=parseEmails();results.textContent='Sending...';const res=await fetch('/api/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({subject:subject.value,body:body.value,signature:sig,recipients})});const data=await res.json();results.textContent=JSON.stringify(data,null,2);}</script></body></html>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LINK | Email Distribution</title>
+
+<style>
+:root {
+  --burgundy: #7b1c1c;
+  --burgundy-dark: #541313;
+  --gold: #b99a55;
+  --ivory: #f8f6f1;
+  --white: #ffffff;
+  --ink: #292522;
+  --muted: #89847e;
+  --line: #e9e4dc;
+  --green: #39765d;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: var(--ivory);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+button, input, textarea { font: inherit; }
+
+.topbar {
+  background: var(--white);
+  border-bottom: 1px solid var(--line);
+  padding: 22px 6%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand {
+  font-family: Georgia, serif;
+  color: var(--burgundy);
+  font-size: 25px;
+  letter-spacing: 5px;
+}
+
+.brand small {
+  display: block;
+  color: var(--muted);
+  font: 9px Arial, sans-serif;
+  letter-spacing: 3px;
+  margin-top: 5px;
+}
+
+.top-label {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.container {
+  max-width: 850px;
+  margin: 65px auto;
+  padding: 0 20px;
+}
+
+.intro { margin-bottom: 35px; }
+
+.eyebrow {
+  color: var(--gold);
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  font-weight: bold;
+}
+
+h1 {
+  font-family: Georgia, serif;
+  font-size: clamp(30px, 5vw, 43px);
+  font-weight: normal;
+  margin: 13px 0;
+  color: var(--burgundy);
+}
+
+.intro p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  margin: 35px 0;
+  gap: 12px;
+}
+
+.progress-step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #aaa39b;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.progress-step .number {
+  width: 29px;
+  height: 29px;
+  border: 1px solid #d8d1c8;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+}
+
+.progress-step.active { color: var(--burgundy); }
+
+.progress-step.active .number,
+.progress-step.completed .number {
+  background: var(--burgundy);
+  border-color: var(--burgundy);
+  color: white;
+}
+
+.progress-line {
+  height: 1px;
+  background: var(--line);
+  flex: 1;
+  min-width: 10px;
+}
+
+.card {
+  background: white;
+  border: 1px solid var(--line);
+  padding: clamp(23px, 5vw, 43px);
+  box-shadow: 0 12px 45px rgba(60,40,20,.045);
+  position: relative;
+  overflow: hidden;
+}
+
+.gold-line {
+  width: 45px;
+  height: 2px;
+  background: var(--gold);
+  margin-bottom: 25px;
+}
+
+.step {
+  display: none;
+  opacity: 0;
+  transform: translateY(9px);
+}
+
+.step.active {
+  display: block;
+}
+
+.step.visible {
+  animation: fadeIn .45s ease forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(9px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.step h2 {
+  font-family: Georgia, serif;
+  font-size: 27px;
+  font-weight: normal;
+  color: var(--burgundy);
+  margin: 0 0 9px;
+}
+
+.step-description {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+  margin-bottom: 30px;
+}
+
+.field { margin-bottom: 23px; }
+
+label {
+  display: block;
+  font-size: 10px;
+  font-weight: bold;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  color: #625b54;
+}
+
+input, textarea {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #fdfcf9;
+  padding: 15px;
+  color: var(--ink);
+  outline: none;
+  border-radius: 0;
+  font-size: 13px;
+  transition: border .2s, background .2s;
+}
+
+input:focus, textarea:focus {
+  border-color: var(--gold);
+  background: white;
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.8;
+}
+
+input::placeholder, textarea::placeholder {
+  color: #b5aea6;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+.signature-note {
+  padding: 14px;
+  background: var(--ivory);
+  border-left: 2px solid var(--gold);
+  color: #756d63;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 35px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  padding: 15px 25px;
+  border: 1px solid var(--burgundy);
+  background: var(--burgundy);
+  color: white;
+  cursor: pointer;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  transition: .25s;
+}
+
+.btn:hover {
+  background: var(--burgundy-dark);
+}
+
+.btn.secondary {
+  background: white;
+  color: var(--burgundy);
+}
+
+.btn.secondary:hover {
+  background: var(--ivory);
+}
+
+.btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.summary {
+  background: var(--ivory);
+  padding: 20px;
+  margin: 22px 0;
+  line-height: 2;
+  font-size: 13px;
+}
+
+.count {
+  color: var(--burgundy);
+  font-family: Georgia, serif;
+  font-size: 30px;
+}
+
+.status {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 15px;
+  line-height: 1.8;
+}
+
+.email-preview {
+  border: 1px solid var(--line);
+  margin-top: 20px;
+  background: white;
+}
+
+.preview-label {
+  background: var(--ivory);
+  padding: 12px 16px;
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.email-preview iframe {
+  width: 100%;
+  height: 530px;
+  border: 0;
+  display: block;
+  background: white;
+}
+
+.results {
+  margin-top: 22px;
+  padding: 18px;
+  background: var(--ivory);
+  font-size: 12px;
+  line-height: 1.9;
+  display: none;
+}
+
+.result-row {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.success { color: var(--green); }
+.failure { color: var(--burgundy); }
+
+.footer {
+  text-align: center;
+  padding: 35px 15px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 1px;
+  line-height: 2;
+}
+
+.footer strong {
+  color: var(--burgundy);
+  letter-spacing: 3px;
+}
+
+@media(max-width:550px) {
+  .topbar { padding: 18px 20px; }
+  .top-label { font-size: 8px; }
+  .container { margin: 35px auto; }
+  .progress-step { font-size: 8px; gap: 5px; }
+  .progress-step .number { width: 25px; height: 25px; }
+  .btn { flex: 1; padding: 14px 12px; }
+}
+</style>
+</head>
+
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    LINK
+    <small>CONNECTION • OPPORTUNITY • GROWTH</small>
+  </div>
+  <div class="top-label">Email Distribution Suite</div>
+</header>
+
+<main class="container">
+
+  <section class="intro">
+    <div class="eyebrow">LINK Communications</div>
+    <h1>Thoughtful communication.<br>Delivered beautifully.</h1>
+    <p>Prepare, review and distribute your messages through one simple workspace.</p>
+  </section>
+
+  <div class="progress">
+    <div class="progress-step active" data-progress="1">
+      <span class="number">01</span> Compose
+    </div>
+    <div class="progress-line"></div>
+    <div class="progress-step" data-progress="2">
+      <span class="number">02</span> Recipients
+    </div>
+    <div class="progress-line"></div>
+    <div class="progress-step" data-progress="3">
+      <span class="number">03</span> Review
+    </div>
+  </div>
+
+  <div class="card">
+
+    <!-- STEP 1 -->
+
+    <section class="step active visible" id="step1">
+      <div class="gold-line"></div>
+      <h2>Compose your message</h2>
+      <p class="step-description">
+        Begin with your subject and message. Your email will be
+        professionally formatted before delivery.
+      </p>
+
+      <div class="field">
+        <label for="subject">Email subject</label>
+        <input id="subject" maxlength="180"
+          placeholder="Enter your email subject">
+      </div>
+
+      <div class="field">
+        <label for="body">Your message</label>
+        <textarea id="body" rows="10"
+          placeholder="Write your message here..."></textarea>
+        <div class="hint">
+          Your message will retain its paragraphs and line breaks.
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="signatureUrl">Signature image URL (optional)</label>
+        <input id="signatureUrl" type="url"
+          placeholder="https://yourwebsite.co.za/signature.png">
+        <div class="hint">
+          Use a publicly accessible HTTPS image URL if you want
+          your signature to appear inside the email.
+        </div>
+      </div>
+
+      <div class="signature-note">
+        Each email includes a consistent LINK-designed header and
+        professional footer. Your signature image will appear
+        beneath your message.
+      </div>
+
+      <div class="actions">
+        <span></span>
+        <button class="btn" onclick="goToStep(2)">
+          Continue <span>→</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- STEP 2 -->
+
+    <section class="step" id="step2">
+      <div class="gold-line"></div>
+      <h2>Who are we reaching?</h2>
+      <p class="step-description">
+        Add your recipient list. Every person receives an individual
+        email, keeping your recipient list private.
+      </p>
+
+      <div class="field">
+        <label for="recipients">Recipient email addresses</label>
+        <textarea id="recipients" rows="10"
+          placeholder="hello@example.com&#10;info@example.com&#10;name@example.com"></textarea>
+        <div class="hint">
+          Separate addresses using commas, semicolons or new lines.
+          Duplicate addresses will automatically be removed.
+        </div>
+      </div>
+
+      <div class="summary">
+        <div class="count" id="recipientCount">0</div>
+        <strong>Valid recipients</strong>
+        <div id="recipientMessage" class="status">
+          Add email addresses to calculate your recipient list.
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn secondary" onclick="goToStep(1)">← Back</button>
+        <button class="btn" onclick="goToStep(3)">
+          Preview email →
+        </button>
+      </div>
+    </section>
+
+    <!-- STEP 3 -->
+
+    <section class="step" id="step3">
+      <div class="gold-line"></div>
+      <h2>Review before delivery</h2>
+      <p class="step-description">
+        Take a final look at your message before distributing it.
+      </p>
+
+      <div class="summary" id="reviewSummary"></div>
+
+      <div class="email-preview">
+        <div class="preview-label">Email appearance preview</div>
+        <iframe id="emailPreview" title="Email preview"></iframe>
+      </div>
+
+      <div class="results" id="results"></div>
+
+      <div class="actions">
+        <button class="btn secondary" id="backBtn"
+          onclick="goToStep(2)">← Back</button>
+        <button class="btn" id="sendBtn" onclick="sendEmails()">
+          Send emails →
+        </button>
+      </div>
+
+      <div class="status" id="sendStatus">
+        Each recipient receives a separate message.
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer">
+  <strong>LINK</strong><br>
+  Connection. Opportunity. Growth.<br>
+  SECURE. SAFE. SWIFT.
+</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+
+let currentStep = 1;
+let sending = false;
+
+function getRecipients() {
+  const emails = $('recipients').value
+    .split(/[\s,;]+/)
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean);
+
+  const unique = [...new Set(emails)];
+
+  const valid = unique.filter(email =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  );
+
+  const invalid = unique.filter(email =>
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  );
+
+  return { valid, invalid, total: unique.length };
+}
+
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, char => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[char]);
+}
+
+function buildEmailHTML(subject, body, signatureUrl) {
+  const safeSubject = escapeHTML(subject);
+  const paragraphs = escapeHTML(body)
+    .split(/\n{2,}/)
+    .map(p => `<p style="margin:0 0 18px;line-height:1.9;color:#49433d;font-size:15px;">${p.replace(/\n/g, '<br>')}</p>`)
+    .join('');
+
+  const signature = signatureUrl
+    ? `<img src="${escapeHTML(signatureUrl)}"
+        alt="Signature"
+        style="display:block;max-width:240px;max-height:110px;height:auto;margin-top:22px;">`
+    : '';
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body style="margin:0;padding:0;background:#f8f6f1;font-family:Arial,sans-serif;">
+
+<table width="100%" cellpadding="0" cellspacing="0"
+  border="0" style="background:#f8f6f1;padding:35px 12px;">
+<tr><td align="center">
+
+<table width="600" cellpadding="0" cellspacing="0"
+  border="0" style="max-width:600px;width:100%;background:#ffffff;">
+
+<tr><td style="background:#7b1c1c;padding:34px 35px 30px;">
+  <div style="font-family:Georgia,serif;font-size:30px;
+    letter-spacing:7px;color:#ffffff;">LINK</div>
+  <div style="font-size:9px;letter-spacing:3px;
+    color:#e7d8b6;margin-top:8px;">
+    CONNECTION • OPPORTUNITY • GROWTH
+  </div>
+</td></tr>
+
+<tr><td style="padding:38px 35px 12px;">
+  <div style="width:42px;height:2px;background:#b99a55;"></div>
+  <h1 style="font-family:Georgia,serif;font-weight:normal;
+    font-size:25px;line-height:1.4;color:#7b1c1c;
+    margin:25px 0 25px;">${safeSubject}</h1>
+</td></tr>
+
+<tr><td style="padding:0 35px 35px;">
+  ${paragraphs}
+  ${signature}
+</td></tr>
+
+<tr><td style="padding:25px 35px;background:#f8f6f1;
+  border-top:1px solid #e9e4dc;">
+  <div style="font-family:Georgia,serif;font-size:19px;
+    letter-spacing:4px;color:#7b1c1c;">LINK</div>
+  <p style="font-size:11px;color:#756e65;line-height:1.9;
+    margin:12px 0;">
+    SECURE. SAFE. SWIFT.<br>
+    <a href="mailto:office@getlinked.co.za"
+      style="color:#7b1c1c;text-decoration:none;">
+      office@getlinked.co.za
+    </a><br>
+    <a href="https://www.getlinked.co.za"
+      style="color:#7b1c1c;text-decoration:none;">
+      www.getlinked.co.za
+    </a><br>
+    +27 74 571 8332
+  </p>
+  <div style="font-size:9px;color:#aaa197;
+    letter-spacing:1px;margin-top:18px;">
+    CONNECT. GROW. MOVE FORWARD.
+  </div>
+</td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+function updateProgress(step) {
+  document.querySelectorAll('.progress-step').forEach(item => {
+    const number = Number(item.dataset.progress);
+    item.classList.toggle('active', number === step);
+    item.classList.toggle('completed', number < step);
+  });
+}
+
+function goToStep(next) {
+  if (sending) return;
+
+  if (next === 2) {
+    if (!$('subject').value.trim() || !$('body').value.trim()) {
+      alert('Please enter an email subject and message.');
+      return;
+    }
+  }
+
+  if (next === 3) {
+    const { valid, invalid } = getRecipients();
+
+    if (!valid.length) {
+      alert('Please add at least one valid email address.');
+      return;
+    }
+
+    if (invalid.length) {
+      alert('Please correct or remove the invalid email addresses before continuing.');
+      return;
+    }
+
+    createPreview();
+  }
+
+  const previous = $('step' + currentStep);
+  const target = $('step' + next);
+
+  previous.classList.remove('visible');
+
+  setTimeout(() => {
+    previous.classList.remove('active');
+    target.classList.add('active');
+
+    requestAnimationFrame(() => {
+      target.classList.add('visible');
+    });
+
+    currentStep = next;
+    updateProgress(next);
+  }, 180);
+}
+
+function createPreview() {
+  const subject = $('subject').value.trim();
+  const body = $('body').value.trim();
+  const signature = $('signatureUrl').value.trim();
+  const { valid } = getRecipients();
+
+  $('reviewSummary').innerHTML = `
+    <strong>Subject:</strong> ${escapeHTML(subject)}<br>
+    <strong>Recipients:</strong> ${valid.length}<br>
+    <strong>Delivery:</strong> Individual emails<br>
+    <strong>Signature:</strong> ${signature ? 'Included' : 'Not included'}
+  `;
+
+  $('emailPreview').srcdoc =
+    buildEmailHTML(subject, body, signature);
+}
+
+$('recipients').addEventListener('input', () => {
+  const { valid, invalid } = getRecipients();
+
+  $('recipientCount').textContent = valid.length;
+
+  $('recipientMessage').textContent = invalid.length
+    ? `${invalid.length} invalid address(es) detected. Please correct them before continuing.`
+    : `${valid.length} unique valid recipient(s) ready.`;
+});
+
+$('signatureUrl').addEventListener('change', () => {
+  const url = $('signatureUrl').value.trim();
+  if (url && !/^https:\/\//i.test(url)) {
+    alert('Please use a publicly accessible HTTPS image URL.');
+    $('signatureUrl').value = '';
+  }
+});
+
+async function sendEmails() {
+  if (sending) return;
+
+  const { valid, invalid } = getRecipients();
+
+  if (!valid.length || invalid.length) {
+    alert('Please check your recipient list.');
+    return;
+  }
+
+  if (!confirm(`You are about to send ${valid.length} individual emails. Continue?`)) {
+    return;
+  }
+
+  sending = true;
+
+  const sendBtn = $('sendBtn');
+  const backBtn = $('backBtn');
+  const results = $('results');
+  const status = $('sendStatus');
+
+  sendBtn.disabled = true;
+  backBtn.disabled = true;
+  sendBtn.textContent = 'Sending...';
+
+  results.style.display = 'block';
+  results.innerHTML = 'Preparing your distribution...';
+
+  status.textContent = 'Please keep this page open while your emails are being sent.';
+
+  try {
+    const response = await fetch('/api/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subject: $('subject').value.trim(),
+        body: $('body').value.trim(),
+        signatureUrl: $('signatureUrl').value.trim(),
+        recipients: valid
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Email delivery failed.');
+    }
+
+    const successful = data.results.filter(r => r.status === 'sent').length;
+    const failed = data.results.length - successful;
+
+    results.innerHTML = `
+      <h3 style="font-family:Georgia,serif;font-weight:normal;color:#7b1c1c;">
+        Distribution complete
+      </h3>
+      <div class="count">${successful}/${data.total}</div>
+      <strong>Successfully sent</strong>
+      <p>${failed} failed delivery attempt(s).</p>
+      ${data.results.map(r => `
+        <div class="result-row ${r.status === 'sent' ? 'success' : 'failure'}">
+          ${escapeHTML(r.email)} — ${r.status === 'sent' ? 'Sent' : 'Failed'}
+          ${r.error ? '<br>' + escapeHTML(r.error) : ''}
+        </div>
+      `).join('')}
+    `;
+
+    status.textContent = 'Distribution results have been returned by the server.';
+
+    sendBtn.textContent = 'Distribution complete';
+
+  } catch (error) {
+    results.innerHTML = `
+      <div class="failure">
+        <strong>Unable to complete distribution.</strong><br>
+        ${escapeHTML(error.message)}
+      </div>
+    `;
+
+    status.textContent = 'Please check the connection and server logs before retrying.';
+    sendBtn.textContent = 'Retry sending';
+  } finally {
+    sending = false;
+    sendBtn.disabled = false;
+    backBtn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>
