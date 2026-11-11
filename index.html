@@ -1,10 +1,11 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LINK | Email Distribution</title>
+<link rel="icon" type="image/png" href="/link-mark.png">
+<link rel="apple-touch-icon" href="/link-mark.png">
 
 <style>
 :root {
@@ -157,13 +158,9 @@ h1 {
   transform: translateY(9px);
 }
 
-.step.active {
-  display: block;
-}
+.step.active { display: block; }
 
-.step.visible {
-  animation: fadeIn .45s ease forwards;
-}
+.step.visible { animation: fadeIn .45s ease forwards; }
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(9px); }
@@ -215,14 +212,9 @@ input:focus, textarea:focus {
   background: white;
 }
 
-textarea {
-  resize: vertical;
-  line-height: 1.8;
-}
+textarea { resize: vertical; line-height: 1.8; }
 
-input::placeholder, textarea::placeholder {
-  color: #b5aea6;
-}
+input::placeholder, textarea::placeholder { color: #b5aea6; }
 
 .hint {
   font-size: 11px;
@@ -230,6 +222,46 @@ input::placeholder, textarea::placeholder {
   margin-top: 8px;
   line-height: 1.6;
 }
+
+/* Image uploads */
+.upload {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.upload input[type="file"] {
+  flex: 1;
+  min-width: 200px;
+  padding: 11px;
+  cursor: pointer;
+}
+
+.upload input[type="file"]::file-selector-button {
+  border: 1px solid var(--burgundy);
+  background: white;
+  color: var(--burgundy);
+  padding: 7px 14px;
+  margin-right: 12px;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.thumb {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  background: var(--ivory);
+  padding: 4px;
+}
+
+.thumb[hidden], .btn[hidden] { display: none; }
+
+.btn.small { padding: 10px 14px; }
 
 .signature-note {
   padding: 14px;
@@ -260,23 +292,13 @@ input::placeholder, textarea::placeholder {
   transition: .25s;
 }
 
-.btn:hover {
-  background: var(--burgundy-dark);
-}
+.btn:hover { background: var(--burgundy-dark); }
 
-.btn.secondary {
-  background: white;
-  color: var(--burgundy);
-}
+.btn.secondary { background: white; color: var(--burgundy); }
 
-.btn.secondary:hover {
-  background: var(--ivory);
-}
+.btn.secondary:hover { background: var(--ivory); }
 
-.btn:disabled {
-  opacity: .55;
-  cursor: not-allowed;
-}
+.btn:disabled { opacity: .55; cursor: not-allowed; }
 
 .summary {
   background: var(--ivory);
@@ -349,10 +371,7 @@ input::placeholder, textarea::placeholder {
   line-height: 2;
 }
 
-.footer strong {
-  color: var(--burgundy);
-  letter-spacing: 3px;
-}
+.footer strong { color: var(--burgundy); letter-spacing: 3px; }
 
 @media(max-width:550px) {
   .topbar { padding: 18px 20px; }
@@ -425,12 +444,27 @@ input::placeholder, textarea::placeholder {
       </div>
 
       <div class="field">
-        <label for="signatureUrl">Signature image URL (optional)</label>
-        <input id="signatureUrl" type="url"
-          placeholder="https://yourwebsite.co.za/signature.png">
-        <div class="hint">
-          Use a publicly accessible HTTPS image URL if you want
-          your signature to appear inside the email.
+        <label for="logoFile">LINK logo (optional)</label>
+        <div class="upload">
+          <img id="logoThumb" class="thumb" alt="Logo preview" hidden>
+          <input id="logoFile" type="file" accept="image/png,image/jpeg,image/webp">
+          <button type="button" class="btn secondary small" id="logoClear" hidden>Remove</button>
+        </div>
+        <div class="hint" id="logoHint">
+          Shown in the email header and footer. A square PNG works best.
+          Once uploaded, it is remembered on this device.
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="signatureFile">Signature image (optional)</label>
+        <div class="upload">
+          <img id="signatureThumb" class="thumb" alt="Signature preview" hidden>
+          <input id="signatureFile" type="file" accept="image/png,image/jpeg,image/webp">
+          <button type="button" class="btn secondary small" id="signatureClear" hidden>Remove</button>
+        </div>
+        <div class="hint" id="signatureHint">
+          Appears beneath your message. A PNG with a transparent background looks best.
         </div>
       </div>
 
@@ -527,8 +561,19 @@ input::placeholder, textarea::placeholder {
 <script>
 const $ = id => document.getElementById(id);
 
+const DEFAULT_LOGO = 'https://www.getlinked.co.za/link-mark.png';
+const MAX_UPLOAD_MB = 10;
+const MAX_WIDTH = { logo: 400, signature: 600 };
+
 let currentStep = 1;
 let sending = false;
+let uploading = 0;
+
+// Uploaded image URLs (empty = nothing uploaded)
+const assets = { logo: '', signature: '' };
+try { assets.logo = localStorage.getItem('linkLogoUrl') || ''; } catch {}
+
+const logoForEmail = () => assets.logo || DEFAULT_LOGO;
 
 function getRecipients() {
   const emails = $('recipients').value
@@ -537,16 +582,13 @@ function getRecipients() {
     .filter(Boolean);
 
   const unique = [...new Set(emails)];
+  const isValid = email => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-  const valid = unique.filter(email =>
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-  );
-
-  const invalid = unique.filter(email =>
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-  );
-
-  return { valid, invalid, total: unique.length };
+  return {
+    valid: unique.filter(isValid),
+    invalid: unique.filter(email => !isValid(email)),
+    total: unique.length
+  };
 }
 
 function escapeHTML(value) {
@@ -559,8 +601,119 @@ function escapeHTML(value) {
   })[char]);
 }
 
-function buildEmailHTML(subject, body, signatureUrl) {
+/* ---------- Image upload ---------- */
+
+const HINTS = {
+  logo: 'Shown in the email header and footer. A square PNG works best. Once uploaded, it is remembered on this device.',
+  signature: 'Appears beneath your message. A PNG with a transparent background looks best.'
+};
+
+function renderAsset(kind) {
+  const url = assets[kind];
+  const thumb = $(kind + 'Thumb');
+  thumb.hidden = !url;
+  if (url) thumb.src = url;
+  $(kind + 'Clear').hidden = !url;
+}
+
+function setAsset(kind, url) {
+  assets[kind] = url;
+  if (kind === 'logo') {
+    try {
+      url ? localStorage.setItem('linkLogoUrl', url) : localStorage.removeItem('linkLogoUrl');
+    } catch {}
+  }
+  renderAsset(kind);
+}
+
+// Resize in the browser so uploads stay small and fast
+function shrinkImage(file, maxWidth) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      const scale = Math.min(1, maxWidth / img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+
+      const ctx = canvas.getContext('2d');
+      const isJpeg = file.type === 'image/jpeg';
+      if (isJpeg) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(objectUrl);
+      resolve(canvas.toDataURL(isJpeg ? 'image/jpeg' : 'image/png', 0.92));
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('That file could not be read as an image.'));
+    };
+
+    img.src = objectUrl;
+  });
+}
+
+async function handleUpload(kind, input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const hint = $(kind + 'Hint');
+
+  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
+    hint.textContent = 'Please choose a PNG, JPEG or WebP image.';
+    input.value = '';
+    return;
+  }
+  if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+    hint.textContent = `Please choose an image smaller than ${MAX_UPLOAD_MB} MB.`;
+    input.value = '';
+    return;
+  }
+
+  uploading++;
+  hint.textContent = 'Uploading...';
+
+  try {
+    const dataUrl = await shrinkImage(file, MAX_WIDTH[kind]);
+
+    const response = await fetch('/api/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind, dataUrl })
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) throw new Error(data.error || 'Upload failed.');
+
+    setAsset(kind, data.url);
+    hint.textContent = 'Uploaded successfully.';
+  } catch (error) {
+    hint.textContent = error.message;
+  } finally {
+    uploading--;
+    input.value = '';
+  }
+}
+
+['logo', 'signature'].forEach(kind => {
+  $(kind + 'File').addEventListener('change', e => handleUpload(kind, e.target));
+  $(kind + 'Clear').addEventListener('click', () => {
+    setAsset(kind, '');
+    $(kind + 'Hint').textContent = HINTS[kind];
+  });
+  renderAsset(kind);
+});
+
+/* ---------- Email preview ---------- */
+
+function buildEmailHTML(subject, body, signatureUrl, logoUrl) {
   const safeSubject = escapeHTML(subject);
+  const logo = escapeHTML(logoUrl);
   const paragraphs = escapeHTML(body)
     .split(/\n{2,}/)
     .map(p => `<p style="margin:0 0 18px;line-height:1.9;color:#49433d;font-size:15px;">${p.replace(/\n/g, '<br>')}</p>`)
@@ -587,14 +740,19 @@ function buildEmailHTML(subject, body, signatureUrl) {
 <table width="600" cellpadding="0" cellspacing="0"
   border="0" style="max-width:600px;width:100%;background:#ffffff;">
 
-<tr><td style="background:#7b1c1c;padding:34px 35px 30px;">
-  <div style="font-family:Georgia,serif;font-size:30px;
-    letter-spacing:7px;color:#ffffff;">LINK</div>
-  <div style="font-size:9px;letter-spacing:3px;
-    color:#e7d8b6;margin-top:8px;">
-    CONNECTION • OPPORTUNITY • GROWTH
-  </div>
-</td></tr>
+<tr>
+  <td align="center" style="background:#7b1c1c;padding:22px 25px 24px;">
+    <img src="${logo}"
+      width="66" height="66" alt="LINK"
+      style="display:block;width:66px;height:66px;max-width:66px;
+      border:0;margin:0 auto 15px;">
+    <div style="height:1px;line-height:1px;background:#b99a55;
+      width:52px;margin:0 auto 13px;">&nbsp;</div>
+    <div style="font-size:9px;letter-spacing:3px;color:#e7d8b6;">
+      CONNECTION • OPPORTUNITY • GROWTH
+    </div>
+  </td>
+</tr>
 
 <tr><td style="padding:38px 35px 12px;">
   <div style="width:42px;height:2px;background:#b99a55;"></div>
@@ -608,28 +766,37 @@ function buildEmailHTML(subject, body, signatureUrl) {
   ${signature}
 </td></tr>
 
-<tr><td style="padding:25px 35px;background:#f8f6f1;
-  border-top:1px solid #e9e4dc;">
-  <div style="font-family:Georgia,serif;font-size:19px;
-    letter-spacing:4px;color:#7b1c1c;">LINK</div>
-  <p style="font-size:11px;color:#756e65;line-height:1.9;
-    margin:12px 0;">
-    SECURE. SAFE. SWIFT.<br>
-    <a href="mailto:office@getlinked.co.za"
-      style="color:#7b1c1c;text-decoration:none;">
-      office@getlinked.co.za
-    </a><br>
-    <a href="https://www.getlinked.co.za"
-      style="color:#7b1c1c;text-decoration:none;">
-      www.getlinked.co.za
-    </a><br>
-    +27 74 571 8332
-  </p>
-  <div style="font-size:9px;color:#aaa197;
-    letter-spacing:1px;margin-top:18px;">
-    CONNECT. GROW. MOVE FORWARD.
-  </div>
-</td></tr>
+<tr>
+  <td style="padding:25px 30px;background:#f8f6f1;
+    border-top:1px solid #e9e4dc;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr>
+        <td valign="top" style="font-size:11px;color:#756e65;line-height:1.9;">
+          <div style="font-family:Georgia,serif;font-size:17px;
+            letter-spacing:3px;color:#7b1c1c;margin-bottom:8px;">LINK</div>
+          <strong style="font-weight:normal;color:#7b1c1c;">SECURE. SAFE. SWIFT.</strong><br>
+          <a href="mailto:office@getlinked.co.za"
+            style="color:#7b1c1c;text-decoration:none;">office@getlinked.co.za</a><br>
+          <a href="https://www.getlinked.co.za"
+            style="color:#7b1c1c;text-decoration:none;">www.getlinked.co.za</a><br>
+          +27 74 571 8332
+        </td>
+        <td width="88" align="right" valign="middle" style="padding-left:12px;">
+          <img src="${logo}"
+            width="62" height="62" alt="LINK mark"
+            style="display:block;width:62px;height:62px;max-width:62px;
+            border:0;margin-left:auto;">
+        </td>
+      </tr>
+      <tr>
+        <td colspan="2" style="font-size:9px;color:#aaa197;
+          letter-spacing:1px;padding-top:17px;">
+          CONNECT. GROW. MOVE FORWARD.
+        </td>
+      </tr>
+    </table>
+  </td>
+</tr>
 
 </table>
 </td></tr>
@@ -648,6 +815,11 @@ function updateProgress(step) {
 
 function goToStep(next) {
   if (sending) return;
+
+  if (uploading) {
+    alert('Please wait for your image upload to finish.');
+    return;
+  }
 
   if (next === 2) {
     if (!$('subject').value.trim() || !$('body').value.trim()) {
@@ -693,18 +865,18 @@ function goToStep(next) {
 function createPreview() {
   const subject = $('subject').value.trim();
   const body = $('body').value.trim();
-  const signature = $('signatureUrl').value.trim();
   const { valid } = getRecipients();
 
   $('reviewSummary').innerHTML = `
     <strong>Subject:</strong> ${escapeHTML(subject)}<br>
     <strong>Recipients:</strong> ${valid.length}<br>
     <strong>Delivery:</strong> Individual emails<br>
-    <strong>Signature:</strong> ${signature ? 'Included' : 'Not included'}
+    <strong>Logo:</strong> ${assets.logo ? 'Custom upload' : 'Default LINK logo'}<br>
+    <strong>Signature:</strong> ${assets.signature ? 'Included' : 'Not included'}
   `;
 
   $('emailPreview').srcdoc =
-    buildEmailHTML(subject, body, signature);
+    buildEmailHTML(subject, body, assets.signature, logoForEmail());
 }
 
 $('recipients').addEventListener('input', () => {
@@ -715,14 +887,6 @@ $('recipients').addEventListener('input', () => {
   $('recipientMessage').textContent = invalid.length
     ? `${invalid.length} invalid address(es) detected. Please correct them before continuing.`
     : `${valid.length} unique valid recipient(s) ready.`;
-});
-
-$('signatureUrl').addEventListener('change', () => {
-  const url = $('signatureUrl').value.trim();
-  if (url && !/^https:\/\//i.test(url)) {
-    alert('Please use a publicly accessible HTTPS image URL.');
-    $('signatureUrl').value = '';
-  }
 });
 
 async function sendEmails() {
@@ -762,7 +926,8 @@ async function sendEmails() {
       body: JSON.stringify({
         subject: $('subject').value.trim(),
         body: $('body').value.trim(),
-        signatureUrl: $('signatureUrl').value.trim(),
+        signatureUrl: assets.signature,
+        logoUrl: assets.logo,
         recipients: valid
       })
     });
