@@ -1,6 +1,16 @@
 const DEFAULT_LOGO = 'https://www.getlinked.co.za/link-mark.png';
 const BLOB_HOST_SUFFIX = '.public.blob.vercel-storage.com';
 
+// Attachment limits (keep in sync with the front end).
+// Vercel caps request bodies at ~4.5 MB and base64 adds ~33%, so stay small.
+const MAX_ATTACHMENT_COUNT = 5;
+const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;        // per file (decoded)
+const MAX_ATTACHMENTS_TOTAL_BYTES = 3 * 1024 * 1024; // all files (decoded)
+const ALLOWED_EXTENSIONS = new Set([
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+  'txt', 'csv', 'rtf', 'png', 'jpg', 'jpeg', 'zip'
+]);
+
 // Only accept HTTPS images that came from our own upload storage
 function validateImageUrl(value) {
   const parsed = new URL(value);
@@ -11,12 +21,54 @@ function validateImageUrl(value) {
   return parsed.href;
 }
 
+// Validates the attachments array and returns Brevo's format:
+// [{ name, content }] where content is base64
+function validateAttachments(input) {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input)) throw new Error('Attachments are invalid.');
+  if (input.length > MAX_ATTACHMENT_COUNT) {
+    throw new Error(`A maximum of ${MAX_ATTACHMENT_COUNT} attachments is allowed.`);
+  }
+
+  let total = 0;
+  return input.map(item => {
+    if (!item || typeof item.filename !== 'string' || typeof item.content !== 'string') {
+      throw new Error('An attachment is invalid.');
+    }
+
+    // Strip any path and control characters from the filename
+    const name = item.filename.split(/[\\/]/).pop().replace(/[\u0000-\u001f]/g, '').trim();
+    const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+
+    if (!name || name.length > 150 || !ALLOWED_EXTENSIONS.has(ext)) {
+      throw new Error(`"${name || 'File'}" is not an allowed attachment type.`);
+    }
+
+    const content = item.content.replace(/\s/g, '');
+    if (!content || !/^[A-Za-z0-9+/]+={0,2}$/.test(content)) {
+      throw new Error(`"${name}" could not be read. Please attach it again.`);
+    }
+
+    const bytes = Buffer.from(content, 'base64').length;
+    if (bytes === 0 || bytes > MAX_ATTACHMENT_BYTES) {
+      throw new Error(`"${name}" is empty or larger than ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB.`);
+    }
+
+    total += bytes;
+    if (total > MAX_ATTACHMENTS_TOTAL_BYTES) {
+      throw new Error(`Attachments exceed the ${MAX_ATTACHMENTS_TOTAL_BYTES / 1024 / 1024} MB total limit.`);
+    }
+
+    return { name, content };
+  });
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed.' });
   }
 
-  const { subject, body, signatureUrl, logoUrl, recipients } = req.body || {};
+  const { subject, body, signatureUrl, logoUrl, recipients, attachments } = req.body || {};
 
   if (!process.env.BREVO_API_KEY || !process.env.SENDER_EMAIL || !process.env.SENDER_NAME) {
     return res.status(500).json({ error: 'Email server configuration is incomplete.' });
@@ -55,6 +107,13 @@ export default async function handler(req, res) {
     if (logoUrl) safeLogo = validateImageUrl(logoUrl);
   } catch {
     return res.status(400).json({ error: 'Logo or signature image is invalid. Please upload it again.' });
+  }
+
+  let safeAttachments = [];
+  try {
+    safeAttachments = validateAttachments(attachments);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
   }
 
   function escapeHTML(value) {
@@ -151,6 +210,18 @@ export default async function handler(req, res) {
   const results = [];
   for (const email of cleanRecipients) {
     try {
+      const payload = {
+        sender: { email: process.env.SENDER_EMAIL, name: process.env.SENDER_NAME },
+        to: [{ email }],
+        subject: subject.trim(),
+        htmlContent,
+        textContent: body.trim(),
+        tags: ['LINK-Email-Distribution']
+      };
+
+      // Brevo expects: attachment: [{ name, content (base64) }]
+      if (safeAttachments.length) payload.attachment = safeAttachments;
+
       const response = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
         headers: {
@@ -158,14 +229,7 @@ export default async function handler(req, res) {
           'content-type': 'application/json',
           'api-key': process.env.BREVO_API_KEY
         },
-        body: JSON.stringify({
-          sender: { email: process.env.SENDER_EMAIL, name: process.env.SENDER_NAME },
-          to: [{ email }],
-          subject: subject.trim(),
-          htmlContent,
-          textContent: body.trim(),
-          tags: ['LINK-Email-Distribution']
-        })
+        body: JSON.stringify(payload)
       });
 
       const data = await response.json().catch(() => ({}));
