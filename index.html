@@ -263,6 +263,55 @@ input::placeholder, textarea::placeholder { color: #b5aea6; }
 
 .btn.small { padding: 10px 14px; }
 
+/* Attachments */
+.attachment-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.attachment-list:empty { display: none; }
+
+.attachment-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  margin-bottom: 6px;
+  background: var(--ivory);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--gold);
+  font-size: 12px;
+}
+
+.attachment-name {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.attachment-size {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+.attachment-remove {
+  border: 0;
+  background: none;
+  color: var(--burgundy);
+  cursor: pointer;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.attachment-remove:hover { text-decoration: underline; }
+
+.hint.error { color: var(--burgundy); }
+
 .signature-note {
   padding: 14px;
   background: var(--ivory);
@@ -468,10 +517,20 @@ input::placeholder, textarea::placeholder { color: #b5aea6; }
         </div>
       </div>
 
+      <div class="field">
+        <label for="attachmentFile">Attachments (optional)</label>
+        <div class="upload">
+          <input id="attachmentFile" type="file" multiple
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.rtf,.png,.jpg,.jpeg,.zip">
+        </div>
+        <ul class="attachment-list" id="attachmentList"></ul>
+        <div class="hint" id="attachmentHint"></div>
+      </div>
+
       <div class="signature-note">
         Each email includes a consistent LINK-designed header and
         professional footer. Your signature image will appear
-        beneath your message.
+        beneath your message, and any attachments are sent with every email.
       </div>
 
       <div class="actions">
@@ -565,6 +624,12 @@ const DEFAULT_LOGO = 'https://www.getlinked.co.za/link-mark.png';
 const MAX_UPLOAD_MB = 10;
 const MAX_WIDTH = { logo: 400, signature: 600 };
 
+// Attachment limits. Files are sent as base64 (~33% larger), and many hosts
+// cap request bodies (e.g. Vercel ~4.5 MB). Raise these if your server allows.
+const MAX_ATTACHMENT_MB = 3;        // per file
+const MAX_ATTACHMENTS_TOTAL_MB = 3; // all files combined
+const MAX_ATTACHMENT_COUNT = 5;
+
 let currentStep = 1;
 let sending = false;
 let uploading = 0;
@@ -572,6 +637,9 @@ let uploading = 0;
 // Uploaded image URLs (empty = nothing uploaded)
 const assets = { logo: '', signature: '' };
 try { assets.logo = localStorage.getItem('linkLogoUrl') || ''; } catch {}
+
+// Attachments: [{ filename, contentType, size, content (base64) }]
+let attachments = [];
 
 const logoForEmail = () => assets.logo || DEFAULT_LOGO;
 
@@ -709,6 +777,112 @@ async function handleUpload(kind, input) {
   renderAsset(kind);
 });
 
+/* ---------- Attachments ---------- */
+
+const ATTACHMENT_HINT =
+  `Up to ${MAX_ATTACHMENT_COUNT} files, ${MAX_ATTACHMENT_MB} MB each ` +
+  `(${MAX_ATTACHMENTS_TOTAL_MB} MB in total). PDF, Word, Excel, PowerPoint, ` +
+  `text, CSV, images and ZIP files are supported.`;
+
+function setAttachmentHint(message, isError) {
+  const hint = $('attachmentHint');
+  hint.textContent = message || ATTACHMENT_HINT;
+  hint.classList.toggle('error', !!isError);
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function totalAttachmentBytes() {
+  return attachments.reduce((sum, a) => sum + a.size, 0);
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = () => reject(new Error(`"${file.name}" could not be read.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderAttachments() {
+  $('attachmentList').innerHTML = attachments.map((a, i) => `
+    <li class="attachment-item">
+      <span>
+        <span class="attachment-name">📎 ${escapeHTML(a.filename)}</span>
+        <span class="attachment-size">${formatSize(a.size)}</span>
+      </span>
+      <button type="button" class="attachment-remove" data-index="${i}">Remove</button>
+    </li>
+  `).join('');
+}
+
+async function handleAttachments(input) {
+  const files = [...input.files];
+  if (!files.length) return;
+
+  uploading++;
+  const problems = [];
+
+  try {
+    for (const file of files) {
+      if (attachments.length >= MAX_ATTACHMENT_COUNT) {
+        problems.push(`Maximum of ${MAX_ATTACHMENT_COUNT} attachments reached.`);
+        break;
+      }
+      if (attachments.some(a => a.filename === file.name && a.size === file.size)) {
+        problems.push(`"${file.name}" is already attached.`);
+        continue;
+      }
+      if (file.size === 0) {
+        problems.push(`"${file.name}" is empty.`);
+        continue;
+      }
+      if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) {
+        problems.push(`"${file.name}" is larger than ${MAX_ATTACHMENT_MB} MB.`);
+        continue;
+      }
+      if (totalAttachmentBytes() + file.size > MAX_ATTACHMENTS_TOTAL_MB * 1024 * 1024) {
+        problems.push(`"${file.name}" would exceed the ${MAX_ATTACHMENTS_TOTAL_MB} MB total limit.`);
+        continue;
+      }
+
+      try {
+        const content = await readFileAsBase64(file);
+        attachments.push({
+          filename: file.name,
+          contentType: file.type || 'application/octet-stream',
+          size: file.size,
+          content
+        });
+      } catch (err) {
+        problems.push(err.message);
+      }
+    }
+  } finally {
+    uploading--;
+    input.value = '';
+    renderAttachments();
+    problems.length ? setAttachmentHint(problems.join(' '), true) : setAttachmentHint();
+  }
+}
+
+$('attachmentFile').addEventListener('change', e => handleAttachments(e.target));
+
+$('attachmentList').addEventListener('click', e => {
+  const btn = e.target.closest('.attachment-remove');
+  if (!btn) return;
+  attachments.splice(Number(btn.dataset.index), 1);
+  renderAttachments();
+  setAttachmentHint();
+});
+
+setAttachmentHint();
+
 /* ---------- Email preview ---------- */
 
 function buildEmailHTML(subject, body, signatureUrl, logoUrl) {
@@ -817,7 +991,7 @@ function goToStep(next) {
   if (sending) return;
 
   if (uploading) {
-    alert('Please wait for your image upload to finish.');
+    alert('Please wait for your file upload to finish.');
     return;
   }
 
@@ -867,12 +1041,17 @@ function createPreview() {
   const body = $('body').value.trim();
   const { valid } = getRecipients();
 
+  const attachmentSummary = attachments.length
+    ? attachments.map(a => `${escapeHTML(a.filename)} (${formatSize(a.size)})`).join(', ')
+    : 'None';
+
   $('reviewSummary').innerHTML = `
     <strong>Subject:</strong> ${escapeHTML(subject)}<br>
     <strong>Recipients:</strong> ${valid.length}<br>
     <strong>Delivery:</strong> Individual emails<br>
     <strong>Logo:</strong> ${assets.logo ? 'Custom upload' : 'Default LINK logo'}<br>
-    <strong>Signature:</strong> ${assets.signature ? 'Included' : 'Not included'}
+    <strong>Signature:</strong> ${assets.signature ? 'Included' : 'Not included'}<br>
+    <strong>Attachments:</strong> ${attachmentSummary}
   `;
 
   $('emailPreview').srcdoc =
@@ -899,7 +1078,11 @@ async function sendEmails() {
     return;
   }
 
-  if (!confirm(`You are about to send ${valid.length} individual emails. Continue?`)) {
+  const attachNote = attachments.length
+    ? ` with ${attachments.length} attachment(s)`
+    : '';
+
+  if (!confirm(`You are about to send ${valid.length} individual emails${attachNote}. Continue?`)) {
     return;
   }
 
@@ -928,14 +1111,21 @@ async function sendEmails() {
         body: $('body').value.trim(),
         signatureUrl: assets.signature,
         logoUrl: assets.logo,
-        recipients: valid
+        recipients: valid,
+        attachments: attachments.map(({ filename, contentType, content }) =>
+          ({ filename, contentType, content }))
       })
     });
 
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      throw new Error(data.error || 'Email delivery failed.');
+      throw new Error(
+        data.error ||
+        (response.status === 413
+          ? 'The attachments are too large for the server. Try smaller files.'
+          : 'Email delivery failed.')
+      );
     }
 
     const successful = data.results.filter(r => r.status === 'sent').length;
