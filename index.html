@@ -497,6 +497,7 @@ input::placeholder, textarea::placeholder { color: #b5aea6; }
         <label>Your message</label>
         <div class="editor-toolbar"><span>INSERT BLOCK</span>
           <button type="button" onclick="insertTextBlock()">+ Text</button>
+          <button type="button" onclick="insertLinkButton()">+ Button</button>
           <button type="button" onclick="chooseBlockImage('image')">+ Image</button>
           <button type="button" onclick="chooseBlockImage('three')">+ 3 Images</button>
           <button type="button" onclick="chooseBlockImage('imageText')">+ Image &amp; Text</button>
@@ -693,6 +694,64 @@ $('body').addEventListener('keyup',saveEditorCursor);$('body').addEventListener(
 $('body').addEventListener('paste',e=>{e.preventDefault();document.execCommand('insertText',false,(e.clipboardData||window.clipboardData).getData('text/plain'));saveEditorCursor();});
 function insertHTMLAtCursor(html){const ed=$('body');ed.focus();const sel=window.getSelection();if(savedEditorRange&&ed.contains(savedEditorRange.startContainer)){sel.removeAllRanges();sel.addRange(savedEditorRange);}if(sel&&sel.rangeCount&&ed.contains(sel.anchorNode)){const r=sel.getRangeAt(0);r.deleteContents();const frag=r.createContextualFragment(html);const last=frag.lastChild;r.insertNode(frag);if(last){const n=document.createRange();n.setStartAfter(last);n.collapse(true);sel.removeAllRanges();sel.addRange(n);savedEditorRange=n.cloneRange();}}else ed.insertAdjacentHTML('beforeend',html);}
 function insertTextBlock(){insertHTMLAtCursor('<p><br></p>');}
+  
+function insertLinkButton(){
+  saveEditorCursor();
+
+  const label = prompt('What should the button say?', 'GET STARTED');
+  if (label === null) return;
+
+  const buttonText = label.trim();
+  if (!buttonText || buttonText.length > 60) {
+    alert('Please enter button wording of up to 60 characters.');
+    return;
+  }
+
+  const enteredUrl = prompt(
+    'Where should the button go? Enter the full website link:',
+    'https://www.getlinked.co.za'
+  );
+
+  if (enteredUrl === null) return;
+
+  const url = enteredUrl.trim();
+  let parsed;
+
+  try {
+    parsed = new URL(url);
+  } catch {
+    alert('Please enter a valid HTTPS website link.');
+    return;
+  }
+
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
+    alert('Please use a secure HTTPS website link.');
+    return;
+  }
+
+  const html = `
+    <table role="presentation" data-email-block="link-button"
+      width="100%" cellpadding="0" cellspacing="0" border="0"
+      style="width:100%;margin:22px 0">
+      <tr>
+        <td align="center" style="padding:8px 0">
+          <a href="${escapeHTML(parsed.href)}" target="_blank"
+            style="display:inline-block;background-color:#7b1c1c;
+            border:1px solid #d4af37;border-radius:3px;
+            padding:14px 28px;color:#ffffff;
+            font-family:Arial,sans-serif;font-size:12px;
+            font-weight:bold;letter-spacing:2px;
+            text-decoration:none;text-align:center">
+            ${escapeHTML(buttonText)}
+          </a>
+        </td>
+      </tr>
+    </table>
+    <p><br></p>
+  `;
+
+  insertHTMLAtCursor(html);
+}
 function chooseBlockImage(type){saveEditorCursor();pendingBlockType=type;const input=$('blockImageInput');input.multiple=type==='three';input.accept=type==='gif'?'image/gif':'image/png,image/jpeg,image/webp';input.click();}
 function readDataURL(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.onerror=()=>reject(new Error('Could not read image.'));r.readAsDataURL(file);});}
 async function uploadBlockImage(file,preserveGif){if(!file||file.size>2*1024*1024)throw new Error('Each image must be 2 MB or smaller.');if(preserveGif&&file.type!=='image/gif')throw new Error('Please select a GIF file.');let dataUrl=await readDataURL(file);if(!preserveGif)dataUrl=await shrinkImage(file,1600);const response=await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'image',dataUrl})});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'Image upload failed.');return data.url;}
