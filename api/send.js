@@ -1,11 +1,12 @@
+
 const DEFAULT_LOGO = 'https://www.getlinked.co.za/link-mark.png';
 const BLOB_HOST_SUFFIX = '.public.blob.vercel-storage.com';
 
 // Attachment limits (keep in sync with the front end).
 // Vercel caps request bodies at ~4.5 MB and base64 adds ~33%, so stay small.
 const MAX_ATTACHMENT_COUNT = 5;
-const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;        // per file (decoded)
-const MAX_ATTACHMENTS_TOTAL_BYTES = 3 * 1024 * 1024; // all files (decoded)
+const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+const MAX_ATTACHMENTS_TOTAL_BYTES = 3 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
   'txt', 'csv', 'rtf', 'png', 'jpg', 'jpeg', 'zip'
@@ -21,8 +22,7 @@ function validateImageUrl(value) {
   return parsed.href;
 }
 
-// Validates the attachments array and returns Brevo's format:
-// [{ name, content }] where content is base64
+// Validates attachments and returns Brevo's format
 function validateAttachments(input) {
   if (input === undefined || input === null) return [];
   if (!Array.isArray(input)) throw new Error('Attachments are invalid.');
@@ -36,7 +36,6 @@ function validateAttachments(input) {
       throw new Error('An attachment is invalid.');
     }
 
-    // Strip any path and control characters from the filename
     const name = item.filename.split(/[\\/]/).pop().replace(/[\u0000-\u001f]/g, '').trim();
     const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
 
@@ -68,18 +67,18 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed.' });
   }
 
-  const { subject, body, signatureUrl, logoUrl, recipients, attachments } = req.body || {};
+  const { subject, body, contentHtml, signatureUrl, logoUrl, recipients, attachments } = req.body || {};
 
   if (!process.env.BREVO_API_KEY || !process.env.SENDER_EMAIL || !process.env.SENDER_NAME) {
     return res.status(500).json({ error: 'Email server configuration is incomplete.' });
   }
 
   if (typeof subject !== 'string' || typeof body !== 'string' ||
-      !subject.trim() || !body.trim()) {
+      !subject.trim() || (!body.trim() && !(typeof contentHtml === 'string' && contentHtml.trim()))) {
     return res.status(400).json({ error: 'Subject and message are required.' });
   }
 
-  if (subject.length > 180 || body.length > 30000) {
+  if (subject.length > 180 || body.length > 30000 || (typeof contentHtml === 'string' && contentHtml.length > 60000)) {
     return res.status(400).json({ error: 'Subject or message exceeds the allowed length.' });
   }
 
@@ -122,7 +121,103 @@ export default async function handler(req, res) {
     })[char]);
   }
 
+  function sanitizeEmailHTML(input) {
+    if (typeof input !== 'string') return '';
+
+    let html = input.replace(/<!--[^]*?-->/g, '')
+      .replace(/<(script|style|iframe|object|embed|svg|math|form|input|button)[^>]*>[^]*?<\/\1\s*>/gi, '')
+      .replace(/<(script|style|iframe|object|embed|svg|math|form|input|button)\b[^>]*\/?>/gi, '');
+
+    const tags = new Set([
+      'p','br','strong','b','em','i','u','ul','ol','li',
+      'div','span','h2','h3','a','img',
+      'table','tbody','thead','tr','td','th'
+    ]);
+
+    const attrsAllowed = new Set([
+      'href','src','alt','title','width','height','align','valign',
+      'colspan','rowspan','border','cellpadding','cellspacing',
+      'role','target'
+    ]);
+
+    const voidTags = new Set(['br','img']);
+
+    return html.replace(/<\/?([a-zA-Z0-9]+)\b([^>]*)>/g, (whole, rawTag, rawAttrs) => {
+      const tag = rawTag.toLowerCase();
+
+      if (!tags.has(tag)) return '';
+      if (whole.startsWith('</')) return voidTags.has(tag) ? '' : `</${tag}>`;
+
+      let attrs = '';
+
+      rawAttrs.replace(/([a-zA-Z_:][a-zA-Z0-9:._-]*)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/g,
+        (m, rn, q, dv, sv, bv) => {
+          const name = rn.toLowerCase();
+          const value = dv ?? sv ?? bv ?? '';
+
+          if (name === 'style') {
+            const safe = new Set([
+              'color','background-color','font-family','font-size','line-height',
+              'margin','margin-top','margin-bottom','padding','padding-top',
+              'padding-bottom','text-align','vertical-align','width','max-width',
+              'height','display','border','border-collapse','text-decoration',
+              'table-layout'
+            ]);
+
+            const decl = value.split(';').map(part => {
+              const i = part.indexOf(':');
+              if (i < 1) return '';
+
+              const prop = part.slice(0, i).trim().toLowerCase();
+              const val = part.slice(i + 1).trim();
+
+              if (!safe.has(prop) || !val ||
+                  /url\s*\(|expression|javascript:|[<>]/i.test(val) ||
+                  !/^[a-zA-Z0-9#(),.%\s"'!-]+$/.test(val)) {
+                return '';
+              }
+
+              return `${prop}:${val}`;
+            }).filter(Boolean);
+
+            if (decl.length) attrs += ` style="${escapeHTML(decl.join(';'))}"`;
+            return m;
+          }
+
+          if (!attrsAllowed.has(name)) return m;
+
+          if (name === 'src') {
+            try {
+              const u = new URL(value);
+              if (u.protocol !== 'https:' || u.username || u.password ||
+                  !u.hostname.endsWith(BLOB_HOST_SUFFIX)) return m;
+            } catch {
+              return m;
+            }
+          }
+
+          if (name === 'href') {
+            try {
+              const u = new URL(value);
+              if (!['https:', 'mailto:'].includes(u.protocol) ||
+                  u.username || u.password) return m;
+            } catch {
+              return m;
+            }
+          }
+
+          if (name === 'target' && value !== '_blank') return m;
+
+          attrs += ` ${name}="${escapeHTML(value)}"`;
+          return m;
+        });
+
+      return `<${tag}${attrs}>`;
+    });
+  }
+
   const safeSubject = escapeHTML(subject.trim());
+
   const paragraphs = escapeHTML(body.trim())
     .split(/\n{2,}/)
     .map(paragraph => `
@@ -137,6 +232,11 @@ export default async function handler(req, res) {
   ` : '';
 
   const logo = escapeHTML(safeLogo);
+  const richMessage = typeof contentHtml === 'string' && contentHtml.trim()
+    ? sanitizeEmailHTML(contentHtml)
+    : '';
+
+  const messageContent = richMessage || paragraphs;
 
   const htmlContent = `
   <!DOCTYPE html>
@@ -170,7 +270,7 @@ export default async function handler(req, res) {
           </td></tr>
 
           <tr><td style="padding:0 35px 35px;">
-            ${paragraphs}
+            ${messageContent}
             ${signature}
           </td></tr>
 
@@ -208,10 +308,14 @@ export default async function handler(req, res) {
   </html>`;
 
   const results = [];
+
   for (const email of cleanRecipients) {
     try {
       const payload = {
-        sender: { email: process.env.SENDER_EMAIL, name: process.env.SENDER_NAME },
+        sender: {
+          email: process.env.SENDER_EMAIL,
+          name: process.env.SENDER_NAME
+        },
         to: [{ email }],
         subject: subject.trim(),
         htmlContent,
@@ -219,7 +323,6 @@ export default async function handler(req, res) {
         tags: ['LINK-Email-Distribution']
       };
 
-      // Brevo expects: attachment: [{ name, content (base64) }]
       if (safeAttachments.length) payload.attachment = safeAttachments;
 
       const response = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -233,20 +336,31 @@ export default async function handler(req, res) {
       });
 
       const data = await response.json().catch(() => ({}));
+
       if (response.ok) {
-        results.push({ email, status: 'sent', messageId: data.messageId || null });
+        results.push({
+          email,
+          status: 'sent',
+          messageId: data.messageId || null
+        });
       } else {
         results.push({
-          email, status: 'failed',
+          email,
+          status: 'failed',
           error: data.message || data.code || 'Brevo rejected the email.'
         });
       }
     } catch (error) {
-      results.push({ email, status: 'failed', error: error.message });
+      results.push({
+        email,
+        status: 'failed',
+        error: error.message
+      });
     }
   }
 
   const successful = results.filter(result => result.status === 'sent').length;
+
   return res.status(200).json({
     total: results.length,
     successful,
