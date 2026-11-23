@@ -161,7 +161,7 @@ export default async function handler(req, res) {
               'margin','margin-top','margin-bottom','padding','padding-top',
               'padding-bottom','text-align','vertical-align','width','max-width',
               'height','display','border','border-collapse','text-decoration',
-              'table-layout'
+              'table-layout','border-radius','letter-spacing','font-weight'
             ]);
 
             const decl = value.split(';').map(part => {
