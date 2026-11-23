@@ -422,6 +422,16 @@ input::placeholder, textarea::placeholder { color: #b5aea6; }
 
 .footer strong { color: var(--burgundy); letter-spacing: 3px; }
 
+
+.editor-toolbar{display:flex;flex-wrap:wrap;gap:7px;padding:12px;background:#f8f6f1;border:1px solid var(--line);border-bottom:0}
+.editor-toolbar span{font-size:9px;letter-spacing:1.3px;color:var(--muted);font-weight:bold;align-self:center;margin-right:4px}
+.editor-toolbar button{border:1px solid #d9d0c3;background:#fff;color:var(--burgundy);padding:9px 11px;font-size:11px;cursor:pointer}
+.editor-toolbar button:hover{border-color:var(--gold);background:#fffdf8}
+.email-editor{min-height:260px;padding:18px;border:1px solid var(--line);background:#fff;outline:none;font-size:14px;line-height:1.8;color:#49433d;overflow-wrap:anywhere}
+.email-editor:focus{border-color:var(--gold)}
+.email-editor:empty:before{content:attr(data-placeholder);color:#b5aea6;pointer-events:none}
+.email-editor p{margin:0 0 16px}.email-editor img{max-width:100%;height:auto}.email-editor table{max-width:100%}.editor-file{display:none}
+
 @media(max-width:550px) {
   .topbar { padding: 18px 20px; }
   .top-label { font-size: 8px; }
@@ -484,12 +494,18 @@ input::placeholder, textarea::placeholder { color: #b5aea6; }
       </div>
 
       <div class="field">
-        <label for="body">Your message</label>
-        <textarea id="body" rows="10"
-          placeholder="Write your message here..."></textarea>
-        <div class="hint">
-          Your message will retain its paragraphs and line breaks.
+        <label>Your message</label>
+        <div class="editor-toolbar"><span>INSERT BLOCK</span>
+          <button type="button" onclick="insertTextBlock()">+ Text</button>
+          <button type="button" onclick="chooseBlockImage('image')">+ Image</button>
+          <button type="button" onclick="chooseBlockImage('three')">+ 3 Images</button>
+          <button type="button" onclick="chooseBlockImage('imageText')">+ Image &amp; Text</button>
+          <button type="button" onclick="chooseBlockImage('gif')">+ GIF</button>
+          <button type="button" onclick="chooseBlockImage('video')">+ Video</button>
         </div>
+        <div id="body" class="email-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write your message here. Place your cursor where you want a block inserted."></div>
+        <input id="blockImageInput" class="editor-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple>
+        <div class="hint">Choose images from your device. They upload to LINK storage. GIFs remain animated. Video blocks use a clickable thumbnail because most email apps do not play embedded video.</div>
       </div>
 
       <div class="field">
@@ -668,6 +684,20 @@ function escapeHTML(value) {
     "'": '&#39;'
   })[char]);
 }
+
+/* ---------- Rich email blocks ---------- */
+let pendingBlockType = '';
+let savedEditorRange = null;
+function saveEditorCursor(){const s=window.getSelection();if(s&&s.rangeCount&&$('body').contains(s.anchorNode))savedEditorRange=s.getRangeAt(0).cloneRange();}
+$('body').addEventListener('keyup',saveEditorCursor);$('body').addEventListener('mouseup',saveEditorCursor);$('body').addEventListener('focus',saveEditorCursor);
+$('body').addEventListener('paste',e=>{e.preventDefault();document.execCommand('insertText',false,(e.clipboardData||window.clipboardData).getData('text/plain'));saveEditorCursor();});
+function insertHTMLAtCursor(html){const ed=$('body');ed.focus();const sel=window.getSelection();if(savedEditorRange&&ed.contains(savedEditorRange.startContainer)){sel.removeAllRanges();sel.addRange(savedEditorRange);}if(sel&&sel.rangeCount&&ed.contains(sel.anchorNode)){const r=sel.getRangeAt(0);r.deleteContents();const frag=r.createContextualFragment(html);const last=frag.lastChild;r.insertNode(frag);if(last){const n=document.createRange();n.setStartAfter(last);n.collapse(true);sel.removeAllRanges();sel.addRange(n);savedEditorRange=n.cloneRange();}}else ed.insertAdjacentHTML('beforeend',html);}
+function insertTextBlock(){insertHTMLAtCursor('<p><br></p>');}
+function chooseBlockImage(type){saveEditorCursor();pendingBlockType=type;const input=$('blockImageInput');input.multiple=type==='three';input.accept=type==='gif'?'image/gif':'image/png,image/jpeg,image/webp';input.click();}
+function readDataURL(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.onerror=()=>reject(new Error('Could not read image.'));r.readAsDataURL(file);});}
+async function uploadBlockImage(file,preserveGif){if(!file||file.size>2*1024*1024)throw new Error('Each image must be 2 MB or smaller.');if(preserveGif&&file.type!=='image/gif')throw new Error('Please select a GIF file.');let dataUrl=await readDataURL(file);if(!preserveGif)dataUrl=await shrinkImage(file,1600);const response=await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'image',dataUrl})});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.error||'Image upload failed.');return data.url;}
+$('blockImageInput').addEventListener('change',async e=>{const files=[...e.target.files],type=pendingBlockType;e.target.value='';if(!files.length)return;if(type==='three'&&files.length!==3){alert('Select exactly three images.');return;}if(type!=='three'&&files.length!==1){alert('Select one image.');return;}uploading++;try{const urls=[];for(const f of files)urls.push(await uploadBlockImage(f,type==='gif'));if(type==='image'||type==='gif'){insertHTMLAtCursor(`<table role="presentation" data-email-block="${type}" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:18px 0"><tr><td align="center"><img src="${escapeHTML(urls[0])}" alt="${type==='gif'?'Animated GIF':'Email image'}" width="530" style="display:block;width:100%;max-width:530px;height:auto;border:0"></td></tr></table><p><br></p>`);}else if(type==='three'){const cells=urls.map((u,i)=>`<td width="33.33%" style="width:33.33%;padding:3px"><img src="${escapeHTML(u)}" alt="Image ${i+1}" width="175" style="display:block;width:100%;height:auto;border:0"></td>`).join('');insertHTMLAtCursor(`<table role="presentation" data-email-block="three-images" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;table-layout:fixed;margin:18px 0"><tr>${cells}</tr></table><p><br></p>`);}else if(type==='imageText'){const copy=prompt('Enter the text to appear beside the image:');if(copy!==null){const left=confirm('Place the image on the LEFT? Choose Cancel for RIGHT.');const img=`<td width="50%" valign="top" style="width:50%;padding:6px"><img src="${escapeHTML(urls[0])}" alt="Email image" width="250" style="display:block;width:100%;height:auto;border:0"></td>`;const txt=`<td width="50%" valign="middle" style="width:50%;padding:12px;font-family:Arial,sans-serif;font-size:14px;line-height:1.7;color:#49433d">${escapeHTML(copy).replace(/\n/g,'<br>')}</td>`;insertHTMLAtCursor(`<table role="presentation" data-email-block="image-text" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;table-layout:fixed;margin:18px 0"><tr>${left?img+txt:txt+img}</tr></table><p><br></p>`);}}else if(type==='video'){const link=prompt('Paste the HTTPS video link (YouTube, Vimeo or your website):');if(link&&/^https:\/\//i.test(link.trim()))insertHTMLAtCursor(`<table role="presentation" data-email-block="video" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin:18px 0"><tr><td align="center"><a href="${escapeHTML(link.trim())}" target="_blank"><img src="${escapeHTML(urls[0])}" alt="Watch video" width="530" style="display:block;width:100%;max-width:530px;height:auto;border:0"></a><p style="font-size:12px;color:#7b1c1c">Watch video</p></td></tr></table><p><br></p>`);else if(link!==null)alert('Enter a valid HTTPS video link.');}}catch(err){alert(err.message);}finally{uploading--;}});
+function editorText(){return $('body').innerText.trim();}function editorHTML(){return $('body').innerHTML.trim();}
 
 /* ---------- Image upload ---------- */
 
@@ -885,10 +915,10 @@ setAttachmentHint();
 
 /* ---------- Email preview ---------- */
 
-function buildEmailHTML(subject, body, signatureUrl, logoUrl) {
+function buildEmailHTML(subject, body, signatureUrl, logoUrl, richHTML) {
   const safeSubject = escapeHTML(subject);
   const logo = escapeHTML(logoUrl);
-  const paragraphs = escapeHTML(body)
+  const paragraphs = richHTML || escapeHTML(body)
     .split(/\n{2,}/)
     .map(p => `<p style="margin:0 0 18px;line-height:1.9;color:#49433d;font-size:15px;">${p.replace(/\n/g, '<br>')}</p>`)
     .join('');
@@ -996,7 +1026,7 @@ function goToStep(next) {
   }
 
   if (next === 2) {
-    if (!$('subject').value.trim() || !$('body').value.trim()) {
+    if (!$('subject').value.trim() || !editorText()) {
       alert('Please enter an email subject and message.');
       return;
     }
@@ -1038,7 +1068,7 @@ function goToStep(next) {
 
 function createPreview() {
   const subject = $('subject').value.trim();
-  const body = $('body').value.trim();
+  const body = editorText();
   const { valid } = getRecipients();
 
   const attachmentSummary = attachments.length
@@ -1055,7 +1085,7 @@ function createPreview() {
   `;
 
   $('emailPreview').srcdoc =
-    buildEmailHTML(subject, body, assets.signature, logoForEmail());
+    buildEmailHTML(subject, body, assets.signature, logoForEmail(), editorHTML());
 }
 
 $('recipients').addEventListener('input', () => {
@@ -1108,7 +1138,8 @@ async function sendEmails() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         subject: $('subject').value.trim(),
-        body: $('body').value.trim(),
+        body: editorText(),
+        contentHtml: editorHTML(),
         signatureUrl: assets.signature,
         logoUrl: assets.logo,
         recipients: valid,
